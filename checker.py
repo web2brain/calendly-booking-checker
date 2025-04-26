@@ -6,36 +6,15 @@ import pprint as pp
 import json
 import ast
 import smtplib, ssl
-# Import the datetime module
 import datetime as dt
 import calendar
 from loguru import logger
 from dotenv import load_dotenv
-
-
-
-
-## Functions
-def get_last_date_of_month(start_date):
-    """
-    This function returns the the last date of the month, given a particular
-    start date.
-    """
-    # Get the year and month of the start date
-
-    start_date = dt.datetime.strptime(start_date, "%Y-%m-%d").date()
-    year = start_date.year
-    month = start_date.month
-
-    # Get the last day of the month
-    last_day = calendar.monthrange(year, month)[1]
-
-    # Return the last date of the month
-    return dt.date(year, month, last_day)
+from dateutil.relativedelta import relativedelta
 
 def send_notification(subject, message, form_url, date):
 
-    logger.info(f"Constructing ntfy notification message for {form_url}?month={date::%Y-%m}&date={date:%Y-%m-%d}")
+    logger.info(f"Constructing ntfy notification message for {form_url}?month={date:%Y-%m}&date={date:%Y-%m-%d}")
     requests.post(NTFY_TOPIC,
     data=message,
     headers={
@@ -47,22 +26,12 @@ def send_notification(subject, message, form_url, date):
     })
 
 
-if __name__ == "__main__":
 
-    ## Setup
-    load_dotenv()
-    TOPIC = os.getenv('TOPIC')
-    NTFY_TOPIC = os.getenv('NTFY_TOPIC')
-    NTFY_TOKEN = os.getenv('NTFY_TOKEN')
-    FORM_URL = os.getenv('FORM_URL')
-    CALENDLY_ID = os.getenv('CALENDLY_ID')
+def checkMonth(date):
 
-    while True:
-
-        time.sleep(5) # Check the booking form for changes every 60 seconds
         logger.info("Initializing current datetime")
-        start_date = dt.datetime.today().strftime("%Y-%m-%d") # get current data "YYYY-MM-DD"
-        end_date = get_last_date_of_month(start_date) # get month end "YYYY-MM-DD"
+        start_date = date.strftime("%Y-%m-%d") # get current data "YYYY-MM-DD"
+        end_date = (date + relativedelta(day=31)).strftime("%Y-%m-%d")
         logger.info(f"Start Date: {start_date} ")
         logger.info(f"End Date: {end_date}")
 
@@ -94,7 +63,7 @@ if __name__ == "__main__":
                 logger.info("Checking previous available slots")
                 previous_schedule = f.read()
                 previous_schedule = ast.literal_eval(previous_schedule) # convert list string to list
-                logger.info("During the last scan, there were {} available slots".format(len(previous_schedule)))
+                logger.info("Currently there are {} available slots known from previous scans".format(len(previous_schedule)))
         except FileNotFoundError:
             print("No prior schedule exists")
             previous_schedule = ""
@@ -112,7 +81,12 @@ if __name__ == "__main__":
 
             removed_timeslots = [
                 timeslot for timeslot in previous_schedule
-                if timeslot not in current_available_timeslots
+                if (timeslot not in current_available_timeslots and timeslot >= start_date and timeslot <= end_date)
+            ]
+
+            other_timeslots = [
+                timeslot for timeslot in previous_schedule
+                if ((timeslot < start_date or timeslot > end_date))
             ]
         else:
             added_timeslots = []
@@ -123,7 +97,7 @@ if __name__ == "__main__":
             logger.info("Updating available slots")
             with open("available_timeslots.txt", "w") as f:
                 # Write the encoded data to the file
-                json_data = json.dumps(current_available_timeslots)
+                json_data = json.dumps(current_available_timeslots + other_timeslots)
                 f.write(json_data)
 
         # Send a notification each time a timeslot is added or removed
@@ -131,14 +105,32 @@ if __name__ == "__main__":
             logger.info(f"Sending an ntfy notification for added slot: {timeslot}")
             start_time = dt.datetime.fromisoformat(timeslot)
             subject = f"{TOPIC}: New timeslot added on {timeslot}"
-            message = f"A new timeslot was added on {start_time:%Y-%m-%d} at {start_time:%H:%M}\n at {form_url}"
+            message = f"A new timeslot was added on {start_time:%Y-%m-%d} at {start_time:%H:%M} at {form_url}"
             send_notification(subject, message, form_url, start_time)
 
         for timeslot in removed_timeslots:
             logger.info(f"Sending an ntfy notification for removed slot: {timeslot} ")
             start_time = dt.datetime.fromisoformat(timeslot)
             subject = f"{TOPIC}: Timeslot {timeslot} has been booked"
-            body = f"Timeslot {start_time:%Y-%m-%d} at {start_time:%H:%M} has been booked at {form_url}"
-            send_notification(subject, body, "", start_time)
+            body = f"Timeslot {start_time:%Y-%m-%d} at {start_time:%H:%M} has been removed at {form_url}"
+            send_notification(subject, body, form_url, start_time)
 
+if __name__ == "__main__":
 
+    ## Setup
+    load_dotenv()
+    TOPIC = os.getenv('TOPIC')
+    NTFY_TOPIC = os.getenv('NTFY_TOPIC')
+    NTFY_TOKEN = os.getenv('NTFY_TOKEN')
+    FORM_URL = os.getenv('FORM_URL')
+    CALENDLY_ID = os.getenv('CALENDLY_ID')
+    END_MONTH = os.getenv('END_MONTH')
+
+    while True:
+        start_date = dt.datetime.today()
+        end_month = dt.datetime.strptime(END_MONTH, "%Y-%m") + relativedelta(day=31)
+        while start_date <= end_month:
+            logger.info(f"Getting available slots from {start_date:%Y-%m-%d}")
+            checkMonth(start_date)
+            time.sleep(60) # Check the booking form for changes every 60 seconds
+            start_date = (start_date.replace(day=1) + dt.timedelta(days=32)).replace(day=1)
