@@ -6,6 +6,7 @@ In order to use this, the configuration values have to be passed via the environ
 The options that need to be configured there are the following:
 
 ```
+TOPIC = ""
 NTFY_TOPIC = ""
 NTFY_TOKEN = ""
 FORM_URL = ""
