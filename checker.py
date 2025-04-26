@@ -72,7 +72,6 @@ def checkMonth(date):
 
         # Compare the current schedule to the previous schedule
         if current_available_timeslots != previous_schedule:
-            logger.info("Bookings have changed since the last scan")
             # The schedule has changed, so check for added or removed timeslots
             added_timeslots = [
                 timeslot for timeslot in current_available_timeslots
@@ -132,5 +131,5 @@ if __name__ == "__main__":
         while start_date <= end_month:
             logger.info(f"Getting available slots from {start_date:%Y-%m-%d}")
             checkMonth(start_date)
-            time.sleep(60) # Check the booking form for changes every 60 seconds
+            time.sleep(5) # Check the booking form for changes every 60 seconds
             start_date = (start_date.replace(day=1) + dt.timedelta(days=32)).replace(day=1)
