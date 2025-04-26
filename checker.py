@@ -10,18 +10,19 @@ import smtplib, ssl
 import datetime as dt
 import calendar
 from loguru import logger
+from dotenv import load_dotenv
 
 
 
 
-## Functions 
+## Functions
 def get_last_date_of_month(start_date):
     """
     This function returns the the last date of the month, given a particular
     start date.
-    """    
+    """
     # Get the year and month of the start date
-    
+
     start_date = dt.datetime.strptime(start_date, "%Y-%m-%d").date()
     year = start_date.year
     month = start_date.month
@@ -32,39 +33,32 @@ def get_last_date_of_month(start_date):
     # Return the last date of the month
     return dt.date(year, month, last_day)
 
-def send_notification(subject, body): 
-    # Connect to the SMTP server
+def send_notification(subject, message, form_url, date):
 
-    server = smtplib.SMTP(SMTP_SERVER, PORT)
-    context = ssl.create_default_context()
-    server.starttls(context=context) # Secure the connection using the tls protocol 
-    server.login(FROM_EMAIL, APP_PASSWORD)
-
-    # Build the email message
-    logger.info("Constructing Email Notification Message")
-    message = f"From: {FROM_EMAIL}\n"
-    message += f"To: {NOTIFICATION_EMAIL}\n"
-    message += f"Subject: {subject}\n\n"
-    message += body
-
-
-    # Send the email
-    server.sendmail(FROM_EMAIL, NOTIFICATION_EMAIL, message)
-
+    logger.info(f"Constructing ntfy notification message for {form_url}?month={date::%Y-%m}&date={date:%Y-%m-%d}")
+    requests.post(NTFY_TOPIC,
+    data=message,
+    headers={
+        "Authorization": f"Bearer {NTFY_TOKEN}",
+        "Title": "New appointment available",
+        "Priority": "urgent",
+        "Tags": "calendar",
+        "Click": f"{form_url}?month={date:%Y-%m}&date={date:%Y-%m-%d}"
+    })
 
 
 if __name__ == "__main__":
 
-    ## Email Setup 
-    NOTIFICATION_EMAIL = "" # Add Email Recipient
-    FROM_EMAIL = "" # Add Email Sender
-    APP_PASSWORD = ""  # Add App Password for Email
-    SMTP_SERVER = "smtp.gmail.com" # The SMTP server to use for sending emails
-    PORT = 587
-
+    ## Setup
+    load_dotenv()
+    TOPIC = os.getenv('TOPIC')
+    NTFY_TOPIC = os.getenv('NTFY_TOPIC')
+    NTFY_TOKEN = os.getenv('NTFY_TOKEN')
+    FORM_URL = os.getenv('FORM_URL')
+    CALENDLY_ID = os.getenv('CALENDLY_ID')
 
     while True:
-        
+
         time.sleep(5) # Check the booking form for changes every 60 seconds
         logger.info("Initializing current datetime")
         start_date = dt.datetime.today().strftime("%Y-%m-%d") # get current data "YYYY-MM-DD"
@@ -72,12 +66,12 @@ if __name__ == "__main__":
         logger.info(f"Start Date: {start_date} ")
         logger.info(f"End Date: {end_date}")
 
-                
-        # Meeting Booking 
-        form_url = "" # Booking form URL
-        date_url = "" # XHR Response
 
-        logger.info("Sending request to calendly")
+        # Meeting Booking
+        form_url = FORM_URL # Booking form URL
+        date_url = f"https://calendly.com/api/booking/event_types/{CALENDLY_ID}/calendar/range?timezone=Europe%2FBerlin&diagnostics=false&range_start={start_date}&range_end={end_date}"# XHR Response
+
+        logger.info("Sending request to calendly " + date_url)
         r = requests.get(date_url)
         response = r.json()
         logger.info("Response recieved")
@@ -89,12 +83,12 @@ if __name__ == "__main__":
         for i in range(0, days):
             if response['days'][i]['status'] == 'available':
                 for slot in response['days'][i]['spots']:
-                    # print('Available time slot: ', slot['start_time'])
-                    # logger.info(f"Slot found at: {slot['start_time']}")
-                    current_available_timeslots.append(slot['start_time']) # only rewrite file if changes exist
+                     print('Available time slot: ', slot['start_time'])
+                     logger.info(f"Slot found at: {slot['start_time']}")
+                     current_available_timeslots.append(slot['start_time']) # only rewrite file if changes exist
         logger.info("There are currently {} available slots".format(len(current_available_timeslots)))
 
-        # Retrieve previous available bookings and compare 
+        # Retrieve previous available bookings and compare
         try:
             with open("available_timeslots.txt", "r") as f:
                 logger.info("Checking previous available slots")
@@ -132,19 +126,19 @@ if __name__ == "__main__":
                 json_data = json.dumps(current_available_timeslots)
                 f.write(json_data)
 
-        # Send an email each time a timeslot is added or removed
+        # Send a notification each time a timeslot is added or removed
         for timeslot in added_timeslots:
-            logger.info(f"Sending an email notification for added slot: {timeslot}")
+            logger.info(f"Sending an ntfy notification for added slot: {timeslot}")
             start_time = dt.datetime.fromisoformat(timeslot)
-            subject = f"One-to-one Online Shop Business Planning Consultation (OSE-F): New timeslot added on {timeslot}"
-            body = f"A new timeslot was added on {start_time:%Y-%m-%d} at {start_time:%I:%M %p}\n at {form_url}"
-            send_notification(subject, body)
+            subject = f"{TOPIC}: New timeslot added on {timeslot}"
+            message = f"A new timeslot was added on {start_time:%Y-%m-%d} at {start_time:%H:%M}\n at {form_url}"
+            send_notification(subject, message, form_url, start_time)
 
         for timeslot in removed_timeslots:
-            logger.info(f"Sending an email notification for removed slot: {timeslot} ")
+            logger.info(f"Sending an ntfy notification for removed slot: {timeslot} ")
             start_time = dt.datetime.fromisoformat(timeslot)
-            subject = f" One-to-one Online Shop Business Planning Consultation (OSE-F): Timeslot {timeslot} has been booked"
-            body = f"Timeslot {start_time:%Y-%m-%d} at {start_time:%I:%M %p} has been booked at {form_url}"
-            send_notification(subject, body)
+            subject = f"{TOPIC}: Timeslot {timeslot} has been booked"
+            body = f"Timeslot {start_time:%Y-%m-%d} at {start_time:%H:%M} has been booked at {form_url}"
+            send_notification(subject, body, "", start_time)
 
 
